@@ -12703,8 +12703,10 @@ if {[tk windowingsystem] eq "win32"} {
 
 getcommits {}
 
+# vim:ft=tcl:et:sw=4:ts=8
 # Local variables:
 # mode: tcl
-# indent-tabs-mode: t
+# indent-tabs-mode: nil
+# tcl-indent-level: 4
 # tab-width: 8
 # End:
