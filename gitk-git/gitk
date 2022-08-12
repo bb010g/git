@@ -294,7 +294,8 @@ proc parseviewargs {n arglist} {
                 set nextisval 1
                 lappend glflags $arg
             }
-            "--not" - "--all" {
+            "--not" - "--all" - "--branches=*" - "--tags=*" - "--remotes=*" -
+            "--glob=*" - "--exclude=*" - "--disambiguate=*" {
                 lappend revargs $arg
             }
             "--merge" {
