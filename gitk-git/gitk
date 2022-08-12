@@ -37,6 +37,25 @@ if {[catch {package require Tcl 8.5} err] || [catch {package require Tk 8.5} err
 
 variable have_tk86 [expr {[package vcompare $tk_version "8.6"] >= 0}]
 
+proc index_+ {index x} {
+    if {[string is integer -strict $index]} {
+        expr {$index + $x}
+    } else {
+        regexp {^([+-]?[^+-]*)([+-].*)?$} $index -> index_l index_r
+        if {$index_r eq {}} {
+            return $index_l+[expr {$x}]
+        }
+        set index2_r [expr {$index_r + $x}]
+        expr {$index2_r > 0 ? "$index_l+$index2_r" :
+            $index2_r < 0 ? "$index_l$index2_r" :
+            $index_l}
+    }
+}
+
+proc lrange2 {list first index last} {
+    list [lrange $list $first $index] [lrange $list [index_+ $index 1] $last]
+}
+
 proc hasworktree {} {
     return [expr {[exec git rev-parse --is-bare-repository] == "false" &&
                   [exec git rev-parse --is-inside-git-dir] == "false"}]
@@ -119,10 +138,8 @@ proc dorunq {} {
     set tstart [clock clicks -milliseconds]
     set t0 $tstart
     while {[llength $runq] > 0} {
-        set fd [lindex $runq 0 0]
-        set script [lindex $runq 0 1]
-        set currunq [lindex $runq 0]
-        set runq [lrange $runq 1 end]
+        set runq [lassign $runq currunq]
+        lassign $currunq fd script
         set repeat [eval $script]
         unset currunq
         set t1 [clock clicks -milliseconds]
@@ -173,7 +190,7 @@ proc unmerged_files {files} {
         set fname [string range $line [expr {$i+1}] end]
         if {[lsearch -exact $mlist $fname] >= 0} continue
         incr nr_unmerged
-        if {$files eq {} || [path_filter $files $fname]} {
+        if {[llength $files] <= 0 || [path_filter $files $fname]} {
             lappend mlist $fname
         }
     }
@@ -319,7 +336,7 @@ proc parseviewargs {n arglist} {
 proc parseviewrevs {view revs} {
     global vposids vnegids
 
-    if {$revs eq {}} {
+    if {[llength $revs] <= 0} {
         set revs HEAD
     } elseif {[lsearch -exact $revs --all] >= 0} {
         lappend revs HEAD
@@ -334,7 +351,7 @@ proc parseviewrevs {view revs} {
             if {!([string length $line] == 40 && [string is xdigit $line])} {
                 if {[string match "fatal:*" $line]} {
                     if {[string match "fatal: ambiguous argument*" $line]
-                        && $badrev ne {}} {
+                        && [llength $badrev] > 0} {
                         if {[llength $badrev] == 1} {
                             set err "unknown revision $badrev"
                         } else {
@@ -414,7 +431,7 @@ proc start_rev_list {view} {
     set files $viewfiles($view)
     if {$vmergeonly($view)} {
         set files [unmerged_files $files]
-        if {$files eq {}} {
+        if {[llength $files] <= 0} {
             global nr_unmerged
             if {$nr_unmerged == 0} {
                 error_popup [mc "No files selected: --merge specified but\
@@ -430,7 +447,7 @@ proc start_rev_list {view} {
 
     if {$vcanopt($view)} {
         set revs [parseviewrevs $view $vrevs($view)]
-        if {$revs eq {}} {
+        if {[llength $revs] <= 0} {
             return 0
         }
         set args [concat $vflags($view) $revs]
@@ -449,7 +466,7 @@ proc start_rev_list {view} {
     set viewinstances($view) [list $i]
     set viewmainheadid($view) $mainheadid
     set viewmainheadid_orig($view) $mainheadid
-    if {$files ne {} && $mainheadid ne {}} {
+    if {[llength $files] > 0 && $mainheadid ne {}} {
         get_viewmainhead $view
     }
     if {$showlocalchanges && $viewmainheadid($view) ne {}} {
@@ -556,7 +573,7 @@ proc updatecommits {} {
         set oldpos $vposids($view)
         set oldneg $vnegids($view)
         set revs [parseviewrevs $view $vrevs($view)]
-        if {$revs eq {}} {
+        if {[llength $revs] <= 0} {
             return
         }
         # note: getting the delta when negative refs change is hard,
@@ -728,7 +745,7 @@ proc newvarc {view id} {
         if {![info exists commitinfo($id)]} {
             parsecommit $id $commitdata($id) 1
         }
-        set cdate [lindex [lindex $commitinfo($id) 4] 0]
+        set cdate [lindex $commitinfo($id) 4 0]
         if {![string is integer -strict $cdate]} {
             set cdate 0
         }
@@ -805,8 +822,7 @@ proc splitvarc {p v} {
     lappend varctok($v) $tok
     lappend varcrow($v) {}
     lappend varcix($v) {}
-    set varccommits($v,$oa) [lrange $ac 0 [expr {$i - 1}]]
-    set varccommits($v,$na) [lrange $ac $i end]
+    lassign [lrange2 $ac 0 [expr {$i - 1}] end] varccommits($v,$oa) varccommits($v,$na)
     lappend varcstart($v) $p
     foreach id $varccommits($v,$na) {
         set varcid($v,$id) $na
@@ -1048,7 +1064,7 @@ proc removefakerow {id} {
         puts "oops: removefakerow [shortids $id] has [llength $parents($v,$id)] parents"
         return
     }
-    set p [lindex $parents($v,$id) 0]
+    lassign $parents($v,$id) p
     set a $varcid($v,$id)
     set i [lsearch -exact $varccommits($v,$a) $id]
     if {$i < 0} {
@@ -1431,7 +1447,7 @@ proc check_interest {id scripts} {
                 lappend newlist $i $script
             }
         }
-        if {$newlist ne {}} {
+        if {[llength $newlist] > 0} {
             set commitinterest($prefix) $newlist
         } else {
             unset commitinterest($prefix)
@@ -1542,7 +1558,7 @@ proc getcommitlines {fd inst view updating}  {
             error_popup "[mc "Can't parse git log output:"] {$shortcmit}"
             exit 1
         }
-        set id [lindex $ids 0]
+        lassign $ids id
         set vid $view,$id
 
         lappend vshortids($view,[string range $id 0 3]) $id
@@ -1582,7 +1598,7 @@ proc getcommitlines {fd inst view updating}  {
         if {![info exists children($vid)]} {
             set children($vid) {}
         } elseif {$a == 0 && [llength $children($vid)] == 1} {
-            set k [lindex $children($vid) 0]
+            lassign $children($vid) k
             if {[llength $parents($view,$k)] == 1 &&
                 (!$vdatemode($view) ||
                  $varcid($view,$k) == [llength $varctok($view)] - 1)} {
@@ -1713,17 +1729,16 @@ proc parsecommit {id contents listed} {
     set header [string range $contents 0 [expr {$hdrend - 1}]]
     set comment [string range $contents [expr {$hdrend + 2}] end]
     foreach line [split $header "\n"] {
-        set line [split $line " "]
-        set tag [lindex $line 0]
+        lassign [lrange2 [lassign [split $line " "] tag] 0 end-2 end] name date
+        set date [join $date " "]
         if {$tag == "author"} {
-            set audate [lrange $line end-1 end]
-            set auname [join [lrange $line 1 end-2] " "]
+            set auname $name
+            set audate $date
         } elseif {$tag == "committer"} {
-            set comdate [lrange $line end-1 end]
-            set comname [join [lrange $line 1 end-2] " "]
+            set comname $name
+            set comdate $date
         }
     }
-    set headline {}
     # take the first non-blank line of the comment as the headline
     set headline [string trimleft $comment]
     set i [string first "\n" $headline]
@@ -2022,9 +2037,8 @@ proc makemenu {m items} {
         set Meta1 Ctrl
     }
     foreach i $items {
-        set name [mc [lindex $i 1]]
-        set type [lindex $i 2]
-        set thing [lindex $i 3]
+        set tail [lassign $i _ name type thing]
+        set name [mc $name]
         set params [list $type]
         if {$name ne {}} {
             set u [string first "&" [string map {&& x} $name]]
@@ -2035,7 +2049,7 @@ proc makemenu {m items} {
         }
         switch -- $type {
             "cascade" {
-                set submenu [string tolower [string map {& ""} [lindex $i 1]]]
+                set submenu [string tolower [string map {& ""} $name]]
                 lappend params -menu $m.$submenu
             }
             "command" {
@@ -2046,7 +2060,6 @@ proc makemenu {m items} {
                     -value [lindex $thing 1]
             }
         }
-        set tail [lrange $i 4 end]
         regsub -all {\yMeta1\y} $tail $Meta1 tail
         eval $m add $params $tail
         if {$type eq "cascade"} {
@@ -2933,8 +2946,9 @@ proc savestuff {w} {
         array set views {}
         if {![info exists permviews]} { set permviews {} }
         foreach view $permviews {
-            set view_save([lindex $view 0]) 1
-            set views([lindex $view 0]) $view
+            lassign $view view_name
+            set view_save($view_name) 1
+            set views($view_name) $view
         }
         puts -nonewline $f "set permviews {"
         for {set v 1} {$v < $current_nextviewnum} {incr v} {
@@ -2948,7 +2962,7 @@ proc savestuff {w} {
         }
         # write old and updated view to their places and append remaining to the end
         foreach view $permviews {
-            set view_name [lindex $view 0]
+            lassign $view view_name
             if {$view_save($view_name)} {
                 puts $f "{$views($view_name)}"
             }
@@ -2974,8 +2988,7 @@ proc resizeclistpanes {win w} {
     global oldwidth oldsash use_ttk
     if {[info exists oldwidth($win)]} {
         if {[info exists oldsash($win)]} {
-            set s0 [lindex $oldsash($win) 0]
-            set s1 [lindex $oldsash($win) 1]
+            lassign $oldsash($win) s0 s1
         } elseif {$use_ttk} {
             set s0 [$win sashpos 0]
             set s1 [$win sashpos 1]
@@ -3334,9 +3347,9 @@ proc treeopendir {w dir} {
     $w mark gravity e:$ix right
     $w conf -state disabled
     set treediropen($dir) 1
-    set top [lindex [split [$w index @0,0] .] 0]
+    lassign [split [$w index @0,0] "."] top
     set ht [$w cget -height]
-    set l [lindex [split [$w index s:$ix] .] 0]
+    lassign [split [$w index s:$ix] "."] l
     if {$l < $top} {
         $w yview $l.0
     } elseif {$l + $n + 1 > $top + $ht} {
@@ -3353,7 +3366,7 @@ proc treeclick {w x y} {
 
     if {$cmitmode ne "tree"} return
     if {![info exists cflist_top]} return
-    set l [lindex [split [$w index "@$x,$y"] "."] 0]
+    lassign [split [$w index "@$x,$y"] "."] l
     $cflist tag remove highlight $cflist_top.0 "$cflist_top.0 lineend"
     $cflist tag add highlight $l.0 "$l.0 lineend"
     set cflist_top $l
@@ -3376,7 +3389,7 @@ proc setfilelist {id} {
 
     treeview $cflist $treefilelist($id) 0
     if {$jump_to_here ne {}} {
-        set f [lindex $jump_to_here 0]
+        lassign $jump_to_here f
         if {[lsearch -exact $treefilelist($id) $f] >= 0} {
             showfile $f
         }
@@ -3480,7 +3493,7 @@ proc highlight_filelist {} {
 
     $cflist conf -state normal
     if {$cmitmode ne "tree"} {
-        set end [lindex [split [$cflist index end] .] 0]
+        lassign [split [$cflist index end] "."] end
         for {set l 2} {$l < $end} {incr l} {
             set line [$cflist get $l.0 "$l.0 lineend"]
             if {[highlight_tag $line] ne {}} {
@@ -3517,7 +3530,7 @@ proc sel_flist {w x y} {
 
     if {$cmitmode eq "tree"} return
     if {![info exists cflist_top]} return
-    set l [lindex [split [$w index "@$x,$y"] "."] 0]
+    lassign [split [$w index "@$x,$y"] "."] l
     $cflist tag remove highlight $cflist_top.0 "$cflist_top.0 lineend"
     $cflist tag add highlight $l.0 "$l.0 lineend"
     set cflist_top $l
@@ -3534,7 +3547,7 @@ proc pop_flist_menu {w X Y x y} {
     global treediffs diffids
 
     stopfinding
-    set l [lindex [split [$w index "@$x,$y"] "."] 0]
+    lassign [split [$w index "@$x,$y"] "."] l
     if {$l <= 1} return
     if {$cmitmode eq "tree"} {
         set e [linetoelt $l]
@@ -3571,7 +3584,7 @@ proc pop_diff_menu {w X Y x y} {
     global diff_menu_filebase
 
     set diff_menu_txtpos [split [$w index "@$x,$y"] "."]
-    set diff_menu_line [lindex $diff_menu_txtpos 0]
+    lassign $diff_menu_txtpos diff_menu_line
     # don't pop up the menu on hunk-separator or file-separator lines
     if {[lsearch -glob [$ctext tag names $diff_menu_line.0] "*sep"] >= 0} {
         return
@@ -3579,8 +3592,7 @@ proc pop_diff_menu {w X Y x y} {
     stopfinding
     set f [find_ctext_fileinfo $diff_menu_line]
     if {$f eq {}} return
-    set flist_menu_file [lindex $f 0]
-    set diff_menu_filebase [lindex $f 1]
+    lassign $f flist_menu_file diff_menu_filebase
     tk_popup $diff_menu $X $Y
 }
 
@@ -3668,7 +3680,7 @@ proc external_diff {} {
 
     if {[llength $diffids] == 1} {
         # no reference commit given
-        set diffidto [lindex $diffids 0]
+        lassign $diffids diffidto
         if {$diffidto eq $nullid} {
             # diffing working copy with index
             set diffidfrom $nullid2
@@ -3681,8 +3693,7 @@ proc external_diff {} {
             set diffidfrom [lindex $parentlist $selectedline 0]
         }
     } else {
-        set diffidfrom [lindex $diffids 0]
-        set diffidto [lindex $diffids 1]
+        lassign $diffids diffidfrom diffidto
     }
 
     # make sure that several diffs wont collide
@@ -3731,7 +3742,7 @@ proc find_hunk_blamespec {base line} {
     # Now scan the lines to determine offset within the hunk
     set max_parent [expr {[llength $base_lines]-2}]
     set dline 0
-    set s_lno [lindex [split $s_lix "."] 0]
+    lassign [split $s_lix "."] s_lno
 
     # Determine if the line is removed
     set chunk [$ctext get $line.0 "$line.1 + $max_parent chars"]
@@ -3784,9 +3795,8 @@ proc external_blame_diff {} {
         set line [expr {$diff_menu_line - $diff_menu_filebase}]
     } else {
         set hinfo [find_hunk_blamespec $diff_menu_filebase $diff_menu_line]
-        if {$hinfo ne {}} {
-            set parent_idx [lindex $hinfo 0]
-            set line [lindex $hinfo 1]
+        if {[llength $hinfo] > 0} {
+            lassign $hinfo parent_idx line
         } else {
             set parent_idx 0
             set line 0
@@ -3801,7 +3811,7 @@ proc external_blame_diff {} {
 proc index_sha1 {fname} {
     set f [open [list | git ls-files -s $fname] r]
     while {[gets $f line] >= 0} {
-        set info [lindex [split $line "\t"] 0]
+        lassign [split $line "\t"] info
         set stage [lindex $info 2]
         if {$stage eq "0" || $stage eq "2"} {
             close $f
@@ -3875,8 +3885,8 @@ proc show_line_source {} {
         set line [expr {$diff_menu_line - $diff_menu_filebase}]
     } else {
         set h [find_hunk_blamespec $diff_menu_filebase $diff_menu_line]
-        if {$h eq {}} return
-        set pi [lindex $h 0]
+        if {[llength $h] <= 0} return
+        lassign $h pi line
         if {$pi == 0} {
             mark_ctext_line $diff_menu_line
             return
@@ -3908,7 +3918,6 @@ proc show_line_source {} {
         } else {
             set id [lindex $parents($curview,$currentid) $pi]
         }
-        set line [lindex $h 1]
     }
     set blameargs {}
     if {$from_index ne {}} {
@@ -3964,9 +3973,7 @@ proc read_line_source {fd inst} {
     }
 
     set fname {}
-    set line [split [lindex $blamestuff($inst) 0] " "]
-    set id [lindex $line 0]
-    set lnum [lindex $line 1]
+    lassign [split [lindex $blamestuff($inst) 0] " "] id lnum
     if {[string length $id] == 40 && [string is xdigit $id] &&
         [string is digit -strict $lnum]} {
         # look for "filename" line
@@ -4045,7 +4052,7 @@ proc shelldequote {str} {
             set used [string length $str]
             break
         }
-        set first [lindex $first 0]
+        lassign $first first
         set ch [string index $str $first]
         if {$first > $used} {
             append ret [string range $str $used [expr {$first - 1}]]
@@ -4074,7 +4081,7 @@ proc shelldequote {str} {
             if {![regexp -start $used -indices "\[\"\\\\]" $str first]} {
                 error "unmatched double-quote"
             }
-            set first [lindex $first 0]
+            lassign $first first
             set ch [string index $str $first]
             if {$first > $used} {
                 append ret [string range $str $used [expr {$first - 1}]]
@@ -4094,9 +4101,7 @@ proc shellsplit {str} {
     while {1} {
         set str [string trimleft $str]
         if {$str eq {}} break
-        set dq [shelldequote $str]
-        set n [lindex $dq 0]
-        set word [lindex $dq 1]
+        lassign [shelldequote $str] n word
         set str [string range $str $n end]
         lappend l $word
     }
@@ -4175,23 +4180,23 @@ proc encode_view_opts {n} {
 
     set rargs [list]
     foreach opt $known_view_options {
-        set patterns [lindex $opt 3]
-        if {$patterns eq {}} continue
-        set pattern [lindex $patterns 0]
+        lassign $opt id type flags patterns title
+        if {[llength $patterns] == 0} continue
+        lassign $patterns pattern
 
-        if {[lindex $opt 1] eq "b"} {
-            set val $newviewopts($n,[lindex $opt 0])
+        if {$type eq "b"} {
+            set val $newviewopts($n,$id)
             if {$val} {
                 lappend rargs $pattern
             }
-        } elseif {[regexp {^r(\d+)$} [lindex $opt 1] type value]} {
-            regexp {^(.*_)} [lindex $opt 0] uselessvar button_id
-            set val $newviewopts($n,$button_id)
+        } elseif {[regexp {^r(\d+)$} $type -> value]} {
+            regexp {^(.*_)} $id -> id
+            set val $newviewopts($n,$id)
             if {$val eq $value} {
                 lappend rargs $pattern
             }
         } else {
-            set val $newviewopts($n,[lindex $opt 0])
+            set val $newviewopts($n,$id)
             set val [string trim $val]
             if {$val ne {}} {
                 set pfix [string range $pattern 0 end-1]
@@ -4208,13 +4213,13 @@ proc decode_view_opts {n view_args} {
     global known_view_options newviewopts
 
     foreach opt $known_view_options {
-        set id [lindex $opt 0]
-        if {[lindex $opt 1] eq "b"} {
+        lassign $opt id type flags patterns title
+        if {$type eq "b"} {
             # Checkboxes
             set val 0
-        } elseif {[regexp {^r(\d+)$} [lindex $opt 1]]} {
+        } elseif {[regexp {^r(\d+)$} $type]} {
             # Radiobuttons
-            regexp {^(.*_)} $id uselessvar id
+            regexp {^(.*_)} $id -> id
             set val 0
         } else {
             # Text fields
@@ -4225,7 +4230,7 @@ proc decode_view_opts {n view_args} {
     set oargs [list]
     set refargs [list]
     foreach arg $view_args {
-        if {[regexp -- {^-([0-9]+)$} $arg arg cnt]
+        if {[regexp -- {^-([0-9]+)$} $arg -> cnt]
             && ![info exists found(limit)]} {
             set newviewopts($n,limit) $cnt
             set found(limit) 1
@@ -4233,16 +4238,16 @@ proc decode_view_opts {n view_args} {
         }
         catch { unset val }
         foreach opt $known_view_options {
-            set id [lindex $opt 0]
+            lassign $opt id type flags patterns title
             if {[info exists found($id)]} continue
-            foreach pattern [lindex $opt 3] {
+            foreach pattern $patterns {
                 if {![string match $pattern $arg]} continue
-                if {[lindex $opt 1] eq "b"} {
+                if {$type eq "b"} {
                     # Check buttons
                     set val 1
-                } elseif {[regexp {^r(\d+)$} [lindex $opt 1] match num]} {
+                } elseif {[regexp {^r(\d+)$} $type -> num]} {
                     # Radio buttons
-                    regexp {^(.*_)} $id uselessvar id
+                    regexp {^(.*_)} $id -> id
                     set val $num
                 } else {
                     # Text input fields
@@ -4314,10 +4319,8 @@ proc vieweditor {top n title} {
     set cexpand 0
     set cnt 0
     foreach opt $known_view_options {
-        set id [lindex $opt 0]
-        set type [lindex $opt 1]
-        set flags [lindex $opt 2]
-        set title [eval [lindex $opt 4]]
+        lassign $opt id type flags patterns title
+        set title [eval $title]
         set lxpad 0
 
         if {$flags eq "+" || $flags eq "*"} {
@@ -4343,18 +4346,18 @@ proc vieweditor {top n title} {
             ${NS}::checkbutton $cframe.c_$id -text $title -variable newviewopts($n,$id)
             pack $cframe.c_$id -in $cframe -side left \
                 -padx [list $lxpad 0] -expand $cexpand -anchor w
-        } elseif {[regexp {^r(\d+)$} $type type sz]} {
-            regexp {^(.*_)} $id uselessvar button_id
+        } elseif {[regexp {^r(\d+)$} $type -> sz]} {
+            regexp {^(.*_)} $id -> button_id
             ${NS}::radiobutton $cframe.c_$id -text $title -variable newviewopts($n,$button_id) -value $sz
             pack $cframe.c_$id -in $cframe -side left \
                 -padx [list $lxpad 0] -expand $cexpand -anchor w
-        } elseif {[regexp {^t(\d+)$} $type type sz]} {
+        } elseif {[regexp {^t(\d+)$} $type -> sz]} {
             ${NS}::label $cframe.l_$id -text $title
             ${NS}::entry $cframe.e_$id -width $sz -background $bgcolor \
                 -textvariable newviewopts($n,$id)
             pack $cframe.l_$id -in $cframe -side left -padx [list $lxpad 0]
             pack $cframe.e_$id -in $cframe -side left -expand 1 -fill x
-        } elseif {[regexp {^t(\d+)=$} $type type sz]} {
+        } elseif {[regexp {^t(\d+)=$} $type -> sz]} {
             ${NS}::label $cframe.l_$id -text $title
             ${NS}::entry $cframe.e_$id -width $sz -background $bgcolor \
                 -textvariable newviewopts($n,$id)
@@ -4692,9 +4695,7 @@ proc vhighlightmore {} {
     global hlview vhl_done commitidx vhighlights curview
 
     set max $commitidx($hlview)
-    set vr [visiblerows]
-    set r0 [lindex $vr 0]
-    set r1 [lindex $vr 1]
+    lassign [visiblerows] r0 r1
     for {set i $vhl_done} {$i < $max} {incr i} {
         set id [commitonrow $i $hlview]
         if {[commitinview $id $curview]} {
@@ -4962,8 +4963,7 @@ proc askfindhighlight {row id} {
 proc markrowmatches {row id} {
     global canv canv2 linehtag linentag commitinfo findloc
 
-    set headline [lindex $commitinfo($id) 0]
-    set author [lindex $commitinfo($id) 1]
+    lassign $commitinfo($id) headline author
     $canv delete match$row
     $canv2 delete match$row
     if {$findloc eq [mc "All fields"] || $findloc eq [mc "Headline"]} {
@@ -5697,8 +5697,7 @@ proc insert_pad {row col npad} {
 
     set pad [ntimes $npad {}]
     set idlist [lindex $rowidlist $row]
-    set bef [lrange $idlist 0 [expr {$col - 1}]]
-    set aft [lrange $idlist $col end]
+    lassign [lrange2 $idlist 0 [expr {$col - 1}] end] bef aft
     set i [lsearch -exact $aft {}]
     if {$i > 0} {
         set aft [lreplace $aft $i $i]
@@ -5946,9 +5945,9 @@ proc drawlineseg {id row endrow arrowlow} {
     if {[info exists linesegs($id)]} {
         set lines $linesegs($id)
         foreach li $lines {
-            set r0 [lindex $li 0]
+            lassign $li r0 r1
             if {$r0 > $row} {
-                if {$r0 == $le && [lindex $li 1] - $row <= $maxlinelen} {
+                if {$r0 == $le && $r1 - $row <= $maxlinelen} {
                     set joinhigh 1
                 }
                 break
@@ -5959,8 +5958,8 @@ proc drawlineseg {id row endrow arrowlow} {
     set joinlow 0
     if {$i > 0} {
         set li [lindex $lines [expr {$i-1}]]
-        set r1 [lindex $li 1]
-        if {$r1 == $row && $le - [lindex $li 0] <= $maxlinelen} {
+        lassign $li r0 r1
+        if {$r1 == $row && $le - $r0 <= $maxlinelen} {
             set joinlow 1
         }
     }
@@ -6215,9 +6214,7 @@ proc drawcmittext {id row col} {
     if {[lindex $commitinfo($id) 6] > 0} {
         set xt [drawnotesign $xt $y]
     }
-    set headline [lindex $commitinfo($id) 0]
-    set name [lindex $commitinfo($id) 1]
-    set date [lindex $commitinfo($id) 2]
+    lassign $commitinfo($id) headline name date
     set date [formatdate $date]
     set font mainfont
     set nfont mainfont
@@ -6394,11 +6391,9 @@ proc drawvisible {} {
     global canv linespc curview vrowmod selectedline targetrow targetid
     global need_redisplay cscroll numcommits
 
-    set fs [$canv yview]
+    lassign [$canv yview] f0 f1
     set ymax [lindex [$canv cget -scrollregion] 3]
     if {$ymax eq {} || $ymax == 0 || $numcommits == 0} return
-    set f0 [lindex $fs 0]
-    set f1 [lindex $fs 1]
     set y0 [expr {int($f0 * $ymax)}]
     set y1 [expr {int($f1 * $ymax)}]
 
@@ -6513,7 +6508,7 @@ proc assigncolor {id} {
         set kids {}
     }
     if {[llength $kids] == 1} {
-        set child [lindex $kids 0]
+        lassign $kids child
         if {[info exists colormap($child)]
             && [llength $parents($curview,$child)] == 1} {
             set colormap($id) $colormap($child)
@@ -6983,8 +6978,8 @@ proc findselectline {l} {
         set f [$ctext get 1.0 $commentend]
         set matches [findmatches $f]
         foreach match $matches {
-            set start [lindex $match 0]
-            set end [expr {[lindex $match 1] + 1}]
+            lassign $match start end
+            incr end
             $ctext tag add found "1.0 + $start c" "1.0 + $end c"
         }
     }
@@ -6995,13 +6990,9 @@ proc findselectline {l} {
 proc markmatches {canv l str tag matches font row} {
     global selectedline
 
-    set bbox [$canv bbox $tag]
-    set x0 [lindex $bbox 0]
-    set y0 [lindex $bbox 1]
-    set y1 [lindex $bbox 3]
+    lassign [$canv bbox $tag] x0 y0 x1 y1
     foreach match $matches {
-        set start [lindex $match 0]
-        set end [lindex $match 1]
+        lassign $match start end
         if {$start > $end} continue
         set xoff [font measure $font [string range $str 0 [expr {$start-1}]]]
         set xlen [font measure $font [string range $str 0 [expr {$end}]]]
@@ -7050,7 +7041,7 @@ proc commit_descriptor {p} {
     }
     set l "..."
     if {[llength $commitinfo($p)] > 1} {
-        set l [lindex $commitinfo($p) 0]
+        lassign $commitinfo($p) l
     }
     return "$p ($l)\n"
 }
@@ -7065,8 +7056,7 @@ proc appendwithlinks {text tags} {
     $ctext insert end $text $tags
     set links [regexp -indices -all -inline {(?:\m|-g)[0-9a-f]{6,40}\M} $text]
     foreach l $links {
-        set s [lindex $l 0]
-        set e [lindex $l 1]
+        lassign $l s e
         set linkid [string range $text $s $e]
         incr e
         $ctext tag delete link$linknum
@@ -7077,8 +7067,7 @@ proc appendwithlinks {text tags} {
     set wlinks [regexp -indices -all -inline -line \
                     {https?://[^[:space:]]+} $text]
     foreach l $wlinks {
-        set s2 [lindex $l 0]
-        set e2 [lindex $l 1]
+        lassign $l s2 e2
         set url [string range $text $s2 $e2]
         incr e2
         $ctext tag delete link$linknum
@@ -7102,7 +7091,7 @@ proc setlink {id lk} {
         if {[llength $matches] > 0} {
             if {[llength $matches] > 1} return
             set known 1
-            set id [lindex $matches 0]
+            lassign $matches id
         }
     } else {
         set known [commitinview $id $curview]
@@ -7219,8 +7208,7 @@ proc appendrefs {pos ids var} {
         if {$var eq "idheads"} {
             set utags {}
             foreach ti $tags {
-                set hname [lindex $ti 0]
-                set id [lindex $ti 1]
+                lassign $ti hname id
                 if {([lsearch -exact $visiblerefs $hname] != -1 || $id eq $mainheadid) &&
                     [llength $itags] < $maxrefs} {
                     lappend itags $ti
@@ -7242,12 +7230,12 @@ proc appendrefs {pos ids var} {
     }
 
     foreach ti $tags {
-        set id [lindex $ti 1]
+        lassign $ti hname id
         set lk link$linknum
         incr linknum
         $ctext tag delete $lk
         $ctext insert $pos $sep
-        $ctext insert $pos [lindex $ti 0] $lk
+        $ctext insert $pos $hname $lk
         setlink $id $lk
         set sep ", "
     }
@@ -7419,11 +7407,9 @@ proc selectline {l isnew {desired_loc {}} {switch_to_patch 0}} {
     if {![info exists commitinfo($id)]} {
         getcommit $id
     }
-    set info $commitinfo($id)
-    set date [formatdate [lindex $info 2]]
-    $ctext insert end "[mc "Author"]: [lindex $info 1]  $date\n"
-    set date [formatdate [lindex $info 4]]
-    $ctext insert end "[mc "Committer"]: [lindex $info 3]  $date\n"
+    lassign $commitinfo($id) headline auname audate comname comdate comment
+    $ctext insert end "[mc "Author"]: $auname  [formatdate $audate]\n"
+    $ctext insert end "[mc "Committer"]: $comname  [formatdate $comdate]\n"
     if {[info exists idtags($id)]} {
         $ctext insert end [mc "Tags:"]
         foreach tag $idtags($id) {
@@ -7475,7 +7461,6 @@ proc selectline {l isnew {desired_loc {}} {switch_to_patch 0}} {
         dispneartags 1
     }
     $ctext insert end "\n"
-    set comment [lindex $info 5]
     if {[string first "\r" $comment] >= 0} {
         set comment [string map {"\r" "\n    "} $comment]
     }
@@ -7608,9 +7593,7 @@ proc unset_posvars {} {
 proc godo {elt} {
     global curview last_posvars
 
-    set view [lindex $elt 0]
-    set cmd [lindex $elt 1]
-    set pv [lindex $elt 3]
+    lassign $elt view cmd _ pv
     if {$curview != $view} {
         showview $view
     }
@@ -7708,7 +7691,7 @@ proc gettreeline {gtf id} {
             lappend treeidlist($id) $sha1
         }
         if {[string index $fname 0] eq "\""} {
-            set fname [lindex $fname 0]
+            lassign $fname fname
         }
         set fname [encoding convertfrom $fname]
         lappend treefilelist($id) $fname
@@ -7786,7 +7769,7 @@ proc getblobline {bf id} {
         if {$jump_to_here ne {} &&
             [lindex $jump_to_here 0] eq [lindex $ctext_file_names 0]} {
             set lnum [expr {[lindex $jump_to_here 1] +
-                            [lindex [split $commentend .] 0]}]
+                            [lindex [split $commentend "."] 0]}]
             mark_ctext_line $lnum
         }
         $ctext config -state disabled
@@ -7970,7 +7953,7 @@ proc gettreediffline {gdtf ids} {
         if {$i >= 0} {
             set file [string range $line [expr {$i+1}] end]
             if {[string index $file 0] eq "\""} {
-                set file [lindex $file 0]
+                lassign $file file
             }
             set file [encoding convertfrom $file]
             if {$file ne [lindex $treediff end]} {
@@ -8137,7 +8120,7 @@ proc makediffhdr {fname ids} {
 proc blobdiffmaybeseehere {ateof} {
     global diffseehere
     if {$diffseehere >= 0} {
-        mark_ctext_line [lindex [split $diffseehere .] 0]
+        mark_ctext_line [lindex [split $diffseehere "."] 0]
     }
     maybe_scroll_ctext $ateof
 }
@@ -8279,7 +8262,7 @@ proc parseblobdiffline {ids line} {
         if {![string compare -length 12 "rename from " $line]} {
             set fname [string range $line [expr 6 + [string first " from " $line] ] end]
             if {[string index $fname 0] eq "\""} {
-                set fname [lindex $fname 0]
+                lassign $fname fname
             }
             set fname [encoding convertfrom $fname]
             set i [lsearch -exact $treediffs($ids) $fname]
@@ -8290,7 +8273,7 @@ proc parseblobdiffline {ids line} {
                   ![string compare -length 8 $line "copy to "]} {
             set fname [string range $line [expr 4 + [string first " to " $line] ] end]
             if {[string index $fname 0] eq "\""} {
-                set fname [lindex $fname 0]
+                lassign $fname fname
             }
             makediffhdr $fname $ids
         } elseif {[string compare -length 3 $line "---"] == 0} {
@@ -8398,7 +8381,7 @@ proc highlightfile_for_scrollpos {topidx} {
     if {$cmitmode eq "tree"} return
     if {![info exists difffilestart]} return
 
-    set top [lindex [split $topidx .] 0]
+    lassign [split $topidx "."] top
     if {$difffilestart eq {} || $top < [lindex $difffilestart 0]} {
         highlightfile 0
     } else {
@@ -8440,7 +8423,7 @@ proc clear_ctext {{first 1.0}} {
     global ctext_file_names ctext_file_lines
     global pendinglinks
 
-    set l [lindex [split $first .] 0]
+    lassign [split $first "."] l
     if {![info exists smarktop] || [$ctext compare $first < $smarktop.0]} {
         set smarktop $l
     }
@@ -8536,7 +8519,7 @@ proc dosearchback {} {
     if {$searchstring ne {}} {
         set sel [$ctext tag ranges sel]
         if {$sel ne {}} {
-            set start [lindex $sel 0]
+            lassign $sel start
         } elseif {[catch {set start [$ctext index anchor]}]} {
             set start @0,[winfo height $ctext]
         }
@@ -8588,8 +8571,8 @@ proc searchmark {first last} {
 proc searchmarkvisible {doall} {
     global ctext smarktop smarkbot
 
-    set topline [lindex [split [$ctext index @0,0] .] 0]
-    set botline [lindex [split [$ctext index @0,[winfo height $ctext]] .] 0]
+    lassign [split [$ctext index @0,0] "."] topline
+    lassign [split [$ctext index @0,[winfo height $ctext]] "."] botline
     if {$doall || $botline < $smarktop || $topline > $smarkbot} {
         # no overlap with previous
         searchmark $topline $botline
@@ -8664,8 +8647,7 @@ proc redisplay {} {
 proc parsefont {f n} {
     global fontattr
 
-    set fontattr($f,family) [lindex $n 0]
-    set s [lindex $n 1]
+    lassign $n fontattr($f,family) s
     if {$s eq {} || $s == 0} {
         set s 10
     } elseif {$s < 0} {
@@ -8774,7 +8756,7 @@ proc gotocommit {} {
                     error_popup [mc "Short SHA1 id %s is ambiguous" $id]
                     return
                 }
-                set id [lindex $matches 0]
+                lassign $matches id
             }
         } else {
             if {[catch {set id [exec git rev-parse --verify $sha1string]}]} {
@@ -8843,7 +8825,7 @@ proc linehover {} {
 
     global commitinfo
 
-    set text [lindex $commitinfo($hoverid) 0]
+    lassign $commitinfo($hoverid) text
     set ymax [lindex [$canv cget -scrollregion] 3]
     if {$ymax == {}} return
     set yfrac [lindex [$canv yview] 0]
@@ -8928,11 +8910,10 @@ proc lineclick {x y id isnew} {
     $ctext insert end "[mc "Parent"]:\t"
     $ctext insert end $id link0
     setlink $id link0
-    set info $commitinfo($id)
-    $ctext insert end "\n\t[lindex $info 0]\n"
-    $ctext insert end "\t[mc "Author"]:\t[lindex $info 1]\n"
-    set date [formatdate [lindex $info 2]]
-    $ctext insert end "\t[mc "Date"]:\t$date\n"
+    lassign $commitinfo($id) headline auname audate
+    $ctext insert end "\n\t$headline\n"
+    $ctext insert end "\t[mc "Author"]:\t$auname\n"
+    $ctext insert end "\t[mc "Date"]:\t[formatdate $audate]\n"
     set kids $children($curview,$id)
     if {$kids ne {}} {
         $ctext insert end "\n[mc "Children"]:"
@@ -8941,13 +8922,13 @@ proc lineclick {x y id isnew} {
             incr i
             if {![info exists commitinfo($child)] && ![getcommit $child]} continue
             set info $commitinfo($child)
+            lassign $commitinfo($child) headline auname audate
             $ctext insert end "\n\t"
             $ctext insert end $child link$i
             setlink $child link$i
-            $ctext insert end "\n\t[lindex $info 0]"
-            $ctext insert end "\n\t[mc "Author"]:\t[lindex $info 1]"
-            set date [formatdate [lindex $info 2]]
-            $ctext insert end "\n\t[mc "Date"]:\t$date\n"
+            $ctext insert end "\n\t$headline"
+            $ctext insert end "\n\t[mc "Author"]:\t$auname"
+            $ctext insert end "\n\t[mc "Date"]:\t[formatdate $audate]\n"
         }
     }
     maybe_scroll_ctext 1
@@ -9052,8 +9033,8 @@ proc find_common_desc {} {
     set l1 [list [rowofcommit $markedid]]
     set l2 [list [rowofcommit $rowmenuid]]
     while 1 {
-        set r1 [lindex $l1 0]
-        set r2 [lindex $l2 0]
+        lassign $l1 r1
+        lassign $l2 r2
         if {$r1 eq {} || $r2 eq {}} break
         if {$r1 == $r2} {
             selectline $r1 1
@@ -9086,8 +9067,7 @@ proc getpatchid {id} {
         # trim off the initial "|"
         set cmd [lrange $cmd 1 end]
         if {[catch {
-            set x [eval exec $cmd | git patch-id]
-            set patchids($id) [lindex $x 0]
+            lassign [eval exec $cmd | git patch-id] patchids($id)
         }]} {
             set patchids($id) "error"
         }
@@ -9117,8 +9097,8 @@ proc do_cmp_commits {a b} {
             set patchb [getpatchid $b]
         }
         if {!$skipa && !$skipb} {
-            set heada [lindex $commitinfo($a) 0]
-            set headb [lindex $commitinfo($b) 0]
+            lassign $commitinfo($a) heada
+            lassign $commitinfo($b) headb
             if {$patcha eq "error"} {
                 appendshortlink $a [mc "Error getting patch ID for "] \
                     [mc " - stopping\n"]
@@ -9160,7 +9140,7 @@ proc do_cmp_commits {a b} {
                     [mc " has %s children - stopping\n" [llength $kids]]
                 break
             }
-            set a [lindex $kids 0]
+            lassign $kids a
         }
         if {$skipb} {
             set kids [real_children $curview,$b]
@@ -9169,7 +9149,7 @@ proc do_cmp_commits {a b} {
                     [mc " has %s children - stopping\n" [llength $kids]]
                 break
             }
-            set b [lindex $kids 0]
+            lassign $kids b
         }
     }
     $ctext conf -state disabled
@@ -9696,14 +9676,13 @@ proc exec_citool {tool_args {baseid {}}} {
         if {![info exists commitinfo($baseid)]} {
             getcommit $baseid
         }
-        set author [lindex $commitinfo($baseid) 1]
-        set date [lindex $commitinfo($baseid) 2]
+        lassign $commitinfo($baseid) headline auname audate
         if {[regexp {^\s*(\S.*\S|\S)\s*<(.*)>\s*$} \
-                    $author author name email]
-            && $date ne {}} {
+                    $auname -> name email]
+            && $audate ne {}} {
             set env(GIT_AUTHOR_NAME) $name
             set env(GIT_AUTHOR_EMAIL) $email
-            set env(GIT_AUTHOR_DATE) $date
+            set env(GIT_AUTHOR_DATE) $audate
         }
     }
 
@@ -10091,10 +10070,9 @@ proc sel_reflist {w x y} {
     global showrefstop reflist headids tagids otherrefids
 
     if {![winfo exists $showrefstop]} return
-    set l [lindex [split [$w index "@$x,$y"] "."] 0]
-    set ref [lindex $reflist [expr {$l-1}]]
-    set n [lindex $ref 0]
-    switch -- [lindex $ref 1] {
+    lassign [split [$w index "@$x,$y"] "."] l
+    lassign [lindex $reflist [expr {$l-1}]] n k
+    switch -- $k {
         "H" {selbyid $headids($n)}
         "R" {selbyid $headids($n)}
         "T" {selbyid $tagids($n)}
@@ -10282,13 +10260,12 @@ proc getallclines {fd} {
 
     set nid 0
     while {[incr nid] <= 1000 && [gets $fd line] >= 0} {
-        set id [lindex $line 0]
+        set olds [lassign $line id]
         if {[info exists allparents($id)]} {
             # seen it already
             continue
         }
         set cachedarcs 0
-        set olds [lrange $line 1 end]
         set allparents($id) $olds
         if {![info exists allchildren($id)]} {
             set allchildren($id) {}
@@ -10410,7 +10387,7 @@ proc splitarc {p} {
         puts "oops splitarc called but [llength $a] arcs already"
         return
     }
-    set a [lindex $a 0]
+    lassign $a a
     set i [lsearch -exact $arcids($a) $p]
     if {$i < 0} {
         puts "oops splitarc $p not in arc $a"
@@ -10424,8 +10401,7 @@ proc splitarc {p} {
         set j [lsearch -exact $arcnos($l) $a]
         set arcnos($l) [lreplace $arcnos($l) $j $j $na]
     }
-    set tail [lrange $arcids($a) [expr {$i+1}] end]
-    set arcids($a) [lrange $arcids($a) 0 $i]
+    lassign [lrange2 $arcids($a) 0 $i end] arcids($a) tail
     set arcend($a) $p
     set arcstart($na) $p
     set arcout($p) $na
@@ -10502,7 +10478,7 @@ proc readcache {f} {
             foreach id [array names idtags] {
                 if {[info exists arcnos($id)] && [llength $arcnos($id)] == 1 &&
                     [llength $allparents($id)] == 1} {
-                    set a [lindex $arcnos($id) 0]
+                    lassign $arcnos($id) a
                     if {$arctags($a) eq {}} {
                         recalcarc $a
                     }
@@ -10511,7 +10487,7 @@ proc readcache {f} {
             foreach id [array names idheads] {
                 if {[info exists arcnos($id)] && [llength $arcnos($id)] == 1 &&
                     [llength $allparents($id)] == 1} {
-                    set a [lindex $arcnos($id) 0]
+                    lassign $arcnos($id) a
                     if {$archeads($a) eq {}} {
                         recalcarc $a
                     }
@@ -10527,14 +10503,13 @@ proc readcache {f} {
             while {[incr a] <= $lim} {
                 set line [gets $f]
                 if {[llength $line] != 3} {error "bad line"}
-                set s [lindex $line 0]
+                lassign $line s e arcids($a)
                 set arcstart($a) $s
                 lappend arcout($s) $a
                 if {![info exists arcnos($s)]} {
                     lappend possible_seeds $s
                     set arcnos($s) {}
                 }
-                set e [lindex $line 1]
                 if {$e eq {}} {
                     set growing($a) 1
                 } else {
@@ -10543,7 +10518,6 @@ proc readcache {f} {
                         set arcout($e) {}
                     }
                 }
-                set arcids($a) [lindex $line 2]
                 foreach id $arcids($a) {
                     lappend allparents($s) $id
                     set s $id
@@ -10660,7 +10634,7 @@ proc anc_or_desc {a b} {
             return 0
         }
         # assert {[llength $arcnos($a)] == 1}
-        set arc [lindex $arcnos($a) 0]
+        lassign $arcnos($a) arc
         set i [lsearch -exact $arcids($arc) $a]
         set j [lsearch -exact $arcids($arc) $b]
         if {$i < 0 || $i > $j} {
@@ -10671,7 +10645,7 @@ proc anc_or_desc {a b} {
     }
 
     if {![info exists arcout($a)]} {
-        set arc [lindex $arcnos($a) 0]
+        lassign $arcnos($a) arc
         if {[info exists arcend($arc)]} {
             set aend $arcend($arc)
         } else {
@@ -10682,7 +10656,7 @@ proc anc_or_desc {a b} {
         set aend $a
     }
     if {![info exists arcout($b)]} {
-        set arc [lindex $arcnos($b) 0]
+        lassign $arcnos($b) arc
         if {[info exists arcend($arc)]} {
             set bend $arcend($arc)
         } else {
@@ -10766,14 +10740,14 @@ proc is_certain {desc anc} {
         }
         if {![info exists arcout($anc)]} {
             # if $anc is partway along an arc, use the start of the arc instead
-            set a [lindex $arcnos($anc) 0]
+            lassign $arcnos($anc) a
             set anc $arcstart($a)
         }
     }
     if {[llength $arcnos($desc)] > 1 || [info exists arcout($desc)]} {
         set x $desc
     } else {
-        set a [lindex $arcnos($desc) 0]
+        lassign $arcnos($desc) a
         set x $arcend($a)
     }
     if {$x == $anc} {
@@ -10891,7 +10865,7 @@ proc desctags {id} {
     set argid $id
     if {[llength $arcnos($id)] == 1 && [llength $allparents($id)] == 1} {
         # part-way along an arc; check that arc first
-        set a [lindex $arcnos($id) 0]
+        lassign $arcnos($id) a
         if {$arctags($a) ne {}} {
             validate_arctags $a
             set i [lsearch -exact $arcids($a) $id]
@@ -11039,7 +11013,7 @@ proc anctags {id} {
     set argid $id
     if {[llength $arcnos($id)] == 1 && [llength $allparents($id)] == 1} {
         # part-way along an arc; check that arc first
-        set a [lindex $arcnos($id) 0]
+        lassign $arcnos($id) a
         if {$arctags($a) ne {}} {
             validate_arctags $a
             set i [lsearch -exact $arcids($a) $id]
@@ -11192,7 +11166,7 @@ proc descheads {id} {
     set aret {}
     if {![info exists arcout($id)]} {
         # part-way along an arc; check it first
-        set a [lindex $arcnos($id) 0]
+        lassign $arcnos($id) a
         if {$archeads($a) ne {}} {
             validate_archeads $a
             set i [lsearch -exact $arcids($a) $id]
@@ -11279,7 +11253,7 @@ proc changedrefs {} {
 
     foreach id [concat [array names idheads] [array names idtags]] {
         if {[info exists arcnos($id)] && ![info exists arcout($id)]} {
-            set a [lindex $arcnos($id) 0]
+            lassign $arcnos($id) a
             if {![info exists donearc($a)]} {
                 recalcarc $a
                 set donearc($a) 1
@@ -11556,7 +11530,7 @@ proc chg_fontparam {v sub op} {
 # Create a property sheet tab page
 proc create_prefs_page {w} {
     global NS
-    set parent [join [lrange [split $w .] 0 end-1] .]
+    set parent [join [lrange [split $w "."] 0 end-1] "."]
     if {[winfo class $parent] eq "TNotebook"} {
         ${NS}::frame $w
     } else {
@@ -12234,8 +12208,7 @@ proc cache_gitattr {attr pathlist} {
         set lim 30
     }
     while {$newlist ne {}} {
-        set head [lrange $newlist 0 [expr {$lim - 1}]]
-        set newlist [lrange $newlist $lim end]
+        lassign [lrange2 $newlist 0 [expr {$lim - 1}] end] head newlist
         if {![catch {set rlist [eval exec git check-attr $attr -- $head]}]} {
             foreach row [split $rlist "\n"] {
                 if {[regexp "(.*): $attr: (.*)" $row m path value]} {
@@ -12653,10 +12626,7 @@ if {[info exists permviews]} {
     foreach v $permviews {
         set n $nextviewnum
         incr nextviewnum
-        set viewname($n) [lindex $v 0]
-        set viewfiles($n) [lindex $v 1]
-        set viewargs($n) [lindex $v 2]
-        set viewargscmd($n) [lindex $v 3]
+        lassign $v viewname($n) viewfiles($n) viewargs($n) viewargscmd($n)
         set viewperm($n) 1
         set viewchanged($n) 0
         addviewmenu $n
