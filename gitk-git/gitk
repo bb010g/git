@@ -341,7 +341,7 @@ proc parseviewrevs {view revs} {
     } elseif {[lsearch -exact $revs --all] >= 0} {
         lappend revs HEAD
     }
-    if {[catch {set ids [eval exec git rev-parse $revs]} err]} {
+    if {[catch {set ids [exec git rev-parse {*}$revs]} err]} {
         # we get stdout followed by stderr in $err
         # for an unknown rev, git rev-parse echoes it and then errors out
         set errlines [split $err "\n"]
@@ -1919,7 +1919,7 @@ proc removehead {id name} {
 
 proc ttk_toplevel {w args} {
     global use_ttk
-    eval [linsert $args 0 ::toplevel $w]
+    ::toplevel $w {*}$args
     if {$use_ttk} {
         place [ttk::frame $w._toplevel_background] -x 0 -y 0 -relwidth 1 -relheight 1
     }
@@ -2010,15 +2010,15 @@ proc setoptions {} {
 }
 
 proc setttkstyle {} {
-    eval font configure TkDefaultFont [fontflags mainfont]
-    eval font configure TkTextFont [fontflags textfont]
-    eval font configure TkHeadingFont [fontflags mainfont]
-    eval font configure TkCaptionFont [fontflags mainfont] -weight bold
-    eval font configure TkTooltipFont [fontflags uifont]
-    eval font configure TkFixedFont   [fontflags textfont]
-    eval font configure TkIconFont    [fontflags uifont]
-    eval font configure TkMenuFont    [fontflags uifont]
-    eval font configure TkSmallCaptionFont [fontflags uifont]
+    font configure TkDefaultFont {*}[fontflags mainfont]
+    font configure TkTextFont    {*}[fontflags textfont]
+    font configure TkHeadingFont {*}[fontflags mainfont]
+    font configure TkCaptionFont {*}[fontflags mainfont] -weight bold
+    font configure TkTooltipFont {*}[fontflags uifont]
+    font configure TkFixedFont   {*}[fontflags textfont]
+    font configure TkIconFont    {*}[fontflags uifont]
+    font configure TkMenuFont    {*}[fontflags uifont]
+    font configure TkSmallCaptionFont {*}[fontflags uifont]
 }
 
 # Make a menu and submenus.
@@ -2061,7 +2061,7 @@ proc makemenu {m items} {
             }
         }
         regsub -all {\yMeta1\y} $tail $Meta1 tail
-        eval $m add $params $tail
+        $m add {*}$params {*}$tail
         if {$type eq "cascade"} {
             makemenu $m.$submenu $thing
         }
@@ -2089,7 +2089,7 @@ proc makedroplist {w varname args} {
                     -exportselection false]
         bind $gm <<ComboboxSelected>> [list $gm selection clear]
     } else {
-        set gm [eval [linsert $args 0 tk_optionMenu $w $varname]]
+        set gm [tk_optionMenu $w $varname {*}$args]
     }
     return $gm
 }
@@ -2217,8 +2217,8 @@ proc makewindow {} {
             .tf.histframe.pwclist sashpos 0 [lindex $::geometry(pwsash0) 0]
         }
     } else {
-        eval .tf.histframe.pwclist sash place 0 $geometry(pwsash0)
-        eval .tf.histframe.pwclist sash place 1 $geometry(pwsash1)
+        .tf.histframe.pwclist sash place 0 {*}$geometry(pwsash0)
+        .tf.histframe.pwclist sash place 1 {*}$geometry(pwsash1)
     }
 
     # a scroll bar to rule them
@@ -3065,9 +3065,9 @@ proc resizecdetpanes {win w} {
 
 proc allcanvs args {
     global canv canv2 canv3
-    eval $canv $args
-    eval $canv2 $args
-    eval $canv3 $args
+    $canv {*}$args
+    $canv2 {*}$args
+    $canv3 {*}$args
 }
 
 proc bindall {event action} {
@@ -3841,7 +3841,7 @@ proc make_relative {f} {
         incr hi
     }
     set elts [concat $res [lrange $elts $ei end]]
-    return [eval file join $elts]
+    return [file join {*}$elts]
 }
 
 proc external_blame {parent_idx {line {}}} {
@@ -3869,7 +3869,7 @@ proc external_blame {parent_idx {line {}}} {
     # being given an absolute path...
     set f [make_relative $f]
     lappend cmdline $base_commit $f
-    if {[catch {eval exec $cmdline &} err]} {
+    if {[catch {exec {*}$cmdline &} err]} {
         error_popup "[mc "git gui blame: command failed:"] $err"
     }
 }
@@ -4320,7 +4320,7 @@ proc vieweditor {top n title} {
     set cnt 0
     foreach opt $known_view_options {
         lassign $opt id type flags patterns title
-        set title [eval $title]
+        set title [{*}$title]
         set lxpad 0
 
         if {$flags eq "+" || $flags eq "*"} {
@@ -4398,7 +4398,7 @@ proc doviewmenu {m first cmd op argv} {
     set nmenu [$m index end]
     for {set i $first} {$i <= $nmenu} {incr i} {
         if {[$m entrycget $i -command] eq $cmd} {
-            eval $m $op $i $argv
+            $m $op $i {*}$argv
             break
         }
     }
@@ -4627,8 +4627,8 @@ proc bolden {id font} {
     $canv itemconf $linehtag($id) -font $font
     if {[info exists currentid] && $id eq $currentid} {
         $canv delete secsel
-        set t [eval $canv create rect [$canv bbox $linehtag($id)] \
-                   -outline {{}} -tags secsel \
+        set t [$canv create rect {*}[$canv bbox $linehtag($id)] \
+                   -outline {} -tags secsel \
                    -fill [$canv cget -selectbackground]]
         $canv lower $t
     }
@@ -4645,8 +4645,8 @@ proc bolden_name {id font} {
     $canv2 itemconf $linentag($id) -font $font
     if {[info exists currentid] && $id eq $currentid} {
         $canv2 delete secsel
-        set t [eval $canv2 create rect [$canv2 bbox $linentag($id)] \
-                   -outline {{}} -tags secsel \
+        set t [$canv2 create rect {*}[$canv2 bbox $linentag($id)] \
+                   -outline {} -tags secsel \
                    -fill [$canv2 cget -selectbackground]]
         $canv2 lower $t
     }
@@ -7157,8 +7157,8 @@ proc browseweb {url} {
     global web_browser
 
     if {$web_browser eq {}} return
-    # Use eval here in case $web_browser is a command plus some arguments
-    if {[catch {eval exec $web_browser [list $url] &} err]} {
+    # Use {*} here in case $web_browser is a command plus some arguments
+    if {[catch {exec {*}$web_browser $url &} err]} {
         error_popup "[mc "Error starting web browser:"] $err"
     }
 }
@@ -7299,15 +7299,15 @@ proc make_secsel {id} {
 
     if {![info exists linehtag($id)]} return
     $canv delete secsel
-    set t [eval $canv create rect [$canv bbox $linehtag($id)] -outline {{}} \
+    set t [$canv create rect {*}[$canv bbox $linehtag($id)] -outline {} \
                -tags secsel -fill [$canv cget -selectbackground]]
     $canv lower $t
     $canv2 delete secsel
-    set t [eval $canv2 create rect [$canv2 bbox $linentag($id)] -outline {{}} \
+    set t [$canv2 create rect {*}[$canv2 bbox $linentag($id)] -outline {} \
                -tags secsel -fill [$canv2 cget -selectbackground]]
     $canv2 lower $t
     $canv3 delete secsel
-    set t [eval $canv3 create rect [$canv3 bbox $linedtag($id)] -outline {{}} \
+    set t [$canv3 create rect {*}[$canv3 bbox $linedtag($id)] -outline {} \
                -tags secsel -fill [$canv3 cget -selectbackground]]
     $canv3 lower $t
 }
@@ -7317,7 +7317,7 @@ proc make_idmark {id} {
 
     if {![info exists linehtag($id)]} return
     $canv delete markid
-    set t [eval $canv create rect [$canv bbox $linehtag($id)] \
+    set t [$canv create rect {*}[$canv bbox $linehtag($id)] \
                -tags markid -outline $fgcolor]
     $canv raise $t
 }
@@ -9067,7 +9067,7 @@ proc getpatchid {id} {
         # trim off the initial "|"
         set cmd [lrange $cmd 1 end]
         if {[catch {
-            lassign [eval exec $cmd | git patch-id] patchids($id)
+            lassign [exec {*}$cmd | git patch-id] patchids($id)
         }]} {
             set patchids($id) "error"
         }
@@ -9312,7 +9312,7 @@ proc mkpatchgo {} {
     # trim off the initial "|"
     set cmd [lrange $cmd 1 end]
     lappend cmd >$fname &
-    if {[catch {eval exec $cmd} err]} {
+    if {[catch {exec {*}$cmd} err]} {
         error_popup "[mc "Error creating patch:"] $err" $patchtop
     }
     catch {destroy $patchtop}
@@ -9414,7 +9414,7 @@ proc redrawtags {id} {
     }
     $canv itemconf $circleitem($row) -fill $ofill
     $canv delete tag.$id
-    set xt [eval drawtags $id $idpos($id)]
+    set xt [drawtags $id {*}$idpos($id)]
     $canv coords $linehtag($id) $xt [lindex $idpos($id) 2]
     set text [$canv itemcget $linehtag($id) -text]
     set font [$canv itemcget $linehtag($id) -font]
@@ -9451,7 +9451,7 @@ proc copyreference {} {
     if {$autosellen < 40} {
         lappend cmd --abbrev=$autosellen
     }
-    set reference [eval exec $cmd $rowmenuid]
+    set reference [exec {*}$cmd $rowmenuid]
 
     clipboard clear
     clipboard append $reference
@@ -9605,7 +9605,7 @@ proc mkbrgo {top} {
     nowbusy newbranch
     update
     if {[catch {
-        eval exec git branch $cmdargs
+        exec git branch {*}$cmdargs
     } err]} {
         notbusy newbranch
         error_popup $err
@@ -9646,7 +9646,7 @@ proc mvbrgo {top prevname} {
     nowbusy renamebranch
     update
     if {[catch {
-        eval exec git branch $cmdargs
+        exec git branch {*}$cmdargs
     } err]} {
         notbusy renamebranch
         error_popup $err
@@ -9686,7 +9686,7 @@ proc exec_citool {tool_args {baseid {}}} {
         }
     }
 
-    eval exec git citool $tool_args &
+    exec git citool {*}$tool_args &
 
     array unset env GIT_AUTHOR_*
     array set env $save_env
@@ -11404,7 +11404,7 @@ proc choosefont {font which} {
     set fonttop $top
     if {![winfo exists $top]} {
         font create sample
-        eval font config sample [font actual $font]
+        font config sample {*}[font actual $font]
         ttk_toplevel $top
         make_transient $top $prefstop
         wm title $top [mc "Gitk font chooser"]
@@ -11763,7 +11763,7 @@ proc choosecolor {v vi w x cmd} {
     if {$c eq {}} return
     $w conf -background $c
     lset $v $vi $c
-    eval $cmd $c
+    {*}$cmd $c
 }
 
 proc setselbg {c} {
@@ -11843,21 +11843,21 @@ proc prefsok {} {
     if {$mainfont ne $fontpref(mainfont)} {
         set mainfont $fontpref(mainfont)
         parsefont mainfont $mainfont
-        eval font configure mainfont [fontflags mainfont]
-        eval font configure mainfontbold [fontflags mainfont 1]
+        font configure mainfont {*}[fontflags mainfont]
+        font configure mainfontbold {*}[fontflags mainfont 1]
         setcoords
         set fontchanged 1
     }
     if {$textfont ne $fontpref(textfont)} {
         set textfont $fontpref(textfont)
         parsefont textfont $textfont
-        eval font configure textfont [fontflags textfont]
-        eval font configure textfontbold [fontflags textfont 1]
+        font configure textfont {*}[fontflags textfont]
+        font configure textfontbold {*}[fontflags textfont 1]
     }
     if {$uifont ne $fontpref(uifont)} {
         set uifont $fontpref(uifont)
         parsefont uifont $uifont
-        eval font configure uifont [fontflags uifont]
+        font configure uifont {*}[fontflags uifont]
     }
     settabs
     if {$showlocalchanges != $oldprefs(showlocalchanges)} {
@@ -12209,7 +12209,7 @@ proc cache_gitattr {attr pathlist} {
     }
     while {$newlist ne {}} {
         lassign [lrange2 $newlist 0 [expr {$lim - 1}] end] head newlist
-        if {![catch {set rlist [eval exec git check-attr $attr -- $head]}]} {
+        if {![catch {set rlist [exec git check-attr {*}$attr -- {*}$head]}]} {
             foreach row [split $rlist "\n"] {
                 if {[regexp "(.*): $attr: (.*)" $row m path value]} {
                     if {[string index $path 0] eq "\""} {
@@ -12431,15 +12431,15 @@ foreach var $config_variables {
 }
 
 parsefont mainfont $mainfont
-eval font create mainfont [fontflags mainfont]
-eval font create mainfontbold [fontflags mainfont 1]
+font create mainfont {*}[fontflags mainfont]
+font create mainfontbold {*}[fontflags mainfont 1]
 
 parsefont textfont $textfont
-eval font create textfont [fontflags textfont]
-eval font create textfontbold [fontflags textfont 1]
+font create textfont {*}[fontflags textfont]
+font create textfontbold {*}[fontflags textfont 1]
 
 parsefont uifont $uifont
-eval font create uifont [fontflags uifont]
+font create uifont {*}[fontflags uifont]
 
 setui $uicolor
 
@@ -12485,7 +12485,7 @@ if {$selecthead eq "HEAD"} {
 if {$i >= [llength $argv] && $revtreeargs ne {}} {
     # no -- on command line, but some arguments (other than --argscmd)
     if {[catch {
-        set f [eval exec git rev-parse --no-revs --no-flags $revtreeargs]
+        set f [exec git rev-parse --no-revs --no-flags {*}$revtreeargs]
         set cmdline_files [split $f "\n"]
         set n [llength $cmdline_files]
         set revtreeargs [lrange $revtreeargs 0 end-$n]
