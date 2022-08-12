@@ -29,14 +29,13 @@ if { [info exists ::env(GITK_MSGSDIR)] } {
 ::msgcat::mcload $gitk_msgsdir
 
 # First check that Tcl/Tk is recent enough
-if {[catch {package require Tk 8.4} err]} {
+if {[catch {package require Tcl 8.5} err] || [catch {package require Tk 8.5} err]} {
     show_error {} . [mc "Sorry, gitk cannot run with this version of Tcl/Tk.\n\
-                         Gitk requires at least Tcl/Tk 8.4."]
+                         Gitk requires at least Tcl/Tk 8.5."]
     exit 1
 }
 
-variable have_tk85 [expr {[package vcompare $tk_version "8.5"] >= 0}]
-variable have_ttk [llength [info commands ::ttk::style]]
+variable have_tk86 [expr {[package vcompare $tk_version "8.6"] >= 0}]
 
 proc hasworktree {} {
     return [expr {[exec git rev-parse --is-bare-repository] == "false" &&
@@ -1913,14 +1912,6 @@ proc ttk_toplevel {w args} {
 }
 
 proc make_transient {window origin} {
-    global have_tk85
-
-    # In MacOS Tk 8.4 transient appears to work by setting
-    # overrideredirect, which is utterly useless, since the
-    # windows get no border, and are not even kept above
-    # the parent.
-    if {!$have_tk85 && [tk windowingsystem] eq {aqua}} return
-
     wm transient $window $origin
 
     # Windows fails to place transient windows normally, so
@@ -2108,7 +2099,7 @@ proc makewindow {} {
     global headctxmenu progresscanv progressitem progresscoords statusw
     global fprogitem fprogcoord lastprogupdate progupdatepending
     global rprogitem rprogcoord rownumsel numcommits
-    global have_tk85 use_ttk NS
+    global use_ttk NS
     global git_version
     global worddiff
 
@@ -2442,9 +2433,7 @@ proc makewindow {} {
         -state disabled -undo 0 -font textfont \
         -yscrollcommand scrolltext -wrap none \
         -xscrollcommand ".bleft.bottom.sbhorizontal set"
-    if {$have_tk85} {
-        $ctext conf -tabstyle wordprocessor
-    }
+    $ctext conf -tabstyle wordprocessor
     ${NS}::scrollbar .bleft.bottom.sb -command "$ctext yview"
     ${NS}::scrollbar .bleft.bottom.sbhorizontal -command "$ctext xview" -orient h
     pack .bleft.top -side top -fill x
@@ -8467,19 +8456,17 @@ proc clear_ctext {{first 1.0}} {
 }
 
 proc settabs {{firstab {}}} {
-    global firsttabstop tabstop ctext have_tk85
+    global firsttabstop tabstop ctext
 
-    if {$firstab ne {} && $have_tk85} {
+    if {$firstab ne {}} {
         set firsttabstop $firstab
     }
     set w [font measure textfont "0"]
     if {$firsttabstop != 0} {
         $ctext conf -tabs [list [expr {($firsttabstop + $tabstop) * $w}] \
                                [expr {($firsttabstop + 2 * $tabstop) * $w}]]
-    } elseif {$have_tk85 || $tabstop != 8} {
-        $ctext conf -tabs [expr {$tabstop * $w}]
     } else {
-        $ctext conf -tabs {}
+        $ctext conf -tabs [expr {$tabstop * $w}]
     }
 }
 
@@ -11580,7 +11567,7 @@ proc create_prefs_page {w} {
 proc prefspage_general {notebook} {
     global NS maxwidth maxgraphpct showneartags showlocalchanges
     global tabstop limitdiffs autoselect autosellen extdifftool perfile_attrs
-    global hideremotes want_ttk have_ttk maxrefs web_browser
+    global hideremotes want_ttk maxrefs web_browser
 
     set page [create_prefs_page $notebook.general]
 
@@ -11642,11 +11629,7 @@ proc prefspage_general {notebook} {
     grid $page.lgen - -sticky w -pady 10
     ${NS}::checkbutton $page.want_ttk -variable want_ttk \
         -text [mc "Use themed widgets"]
-    if {$have_ttk} {
-        ${NS}::label $page.ttk_note -text [mc "(change requires restart)"]
-    } else {
-        ${NS}::label $page.ttk_note -text [mc "(currently unavailable)"]
-    }
+    ${NS}::label $page.ttk_note -text [mc "(change requires restart)"]
     grid x $page.want_ttk $page.ttk_note -sticky w
     return $page
 }
@@ -11728,7 +11711,7 @@ proc doprefs {} {
     global oldprefs prefstop showneartags showlocalchanges
     global uicolor bgcolor fgcolor ctext diffcolors selectbgcolor markbgcolor
     global tabstop limitdiffs autoselect autosellen extdifftool perfile_attrs
-    global hideremotes want_ttk have_ttk
+    global hideremotes want_ttk
 
     set top .gitkprefs
     set prefstop $top
@@ -11934,23 +11917,7 @@ proc formatdate {d} {
         # If $datetimeformat includes a timezone, display in the
         # timezone of the argument.  Otherwise, display in local time.
         if {[string match {*%[zZ]*} $datetimeformat]} {
-            if {[catch {set d [clock format [lindex $d 0] -timezone [lindex $d 1] -format $datetimeformat]}]} {
-                # Tcl < 8.5 does not support -timezone.  Emulate it by
-                # setting TZ (e.g. TZ=<-0430>+04:30).
-                global env
-                if {[info exists env(TZ)]} {
-                    set savedTZ $env(TZ)
-                }
-                set zone [lindex $d 1]
-                set sign [string map {+ - - +} [string index $zone 0]]
-                set env(TZ) <$zone>$sign[string range $zone 1 2]:[string range $zone 3 4]
-                set d [clock format [lindex $d 0] -format $datetimeformat]
-                if {[info exists savedTZ]} {
-                    set env(TZ) $savedTZ
-                } else {
-                    unset env(TZ)
-                }
-            }
+            set d [clock format [lindex $d 0] -timezone [lindex $d 1] -format $datetimeformat]
         } else {
             set d [clock format [lindex $d 0] -format $datetimeformat]
         }
@@ -12575,7 +12542,7 @@ set nullid "0000000000000000000000000000000000000000"
 set nullid2 "0000000000000000000000000000000000000001"
 set nullfile "/dev/null"
 
-set use_ttk [expr {$have_ttk && $want_ttk}]
+set use_ttk $want_ttk
 set NS [expr {$use_ttk ? "ttk" : ""}]
 
 if {$use_ttk} {
